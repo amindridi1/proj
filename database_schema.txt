@@ -1,0 +1,143 @@
+create table public.agents (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  hostname text not null,
+  ip text not null,
+  port integer not null,
+  last_seen timestamp with time zone null default CURRENT_TIMESTAMP,
+  constraint agents_pkey primary key (id),
+  constraint agents_hostname_key unique (hostname)
+) TABLESPACE pg_default;
+create table public.anomaly_causes (
+  id serial not null,
+  anomaly_id integer not null,
+  anomaly_type character varying(50) not null,
+  cause text not null,
+  recommendation text not null,
+  device_type character varying(50) null,
+  constraint anomaly_causes_pkey primary key (id),
+  constraint anomaly_causes_anomaly_id_fkey foreign KEY (anomaly_id) references anomaly_logs (id) on update CASCADE on delete CASCADE,
+  constraint fk_anomaly_causes_anomaly foreign KEY (anomaly_id) references anomaly_logs (id) on update CASCADE on delete CASCADE
+) TABLESPACE pg_default;
+create table public.anomaly_logs (
+  id serial not null,
+  timestamp timestamp without time zone not null,
+  event_id integer not null,
+  level character varying(10) not null,
+  source character varying(255) not null,
+  message text not null,
+  hostname character varying(255) not null,
+  cpu_usage double precision not null,
+  memory_usage double precision not null,
+  is_anomaly boolean not null,
+  anomaly_score double precision not null,
+  category text null,
+  log_id integer null,
+  constraint anomaly_logs_pkey primary key (id),
+  constraint fk_anomaly_logs_log foreign KEY (log_id) references logs_with_metrics (id)
+) TABLESPACE pg_default;
+create table public.anomaly_scripts (
+  id serial not null,
+  cause_id integer not null,
+  script_content text not null,
+  device_type text not null,
+  status text not null default 'pending'::text,
+  recommendation text null,
+  created_at timestamp with time zone null default now(),
+  executed_at timestamp with time zone null,
+  updated_at timestamp with time zone null default now(),
+  execution_time double precision null,
+  agent_uuid uuid null,
+  constraint anomaly_scripts_pkey primary key (id),
+  constraint anomaly_scripts_cause_id_fkey foreign KEY (cause_id) references anomaly_causes (id) on delete CASCADE,
+  constraint fk_anomaly_scripts_agent foreign KEY (agent_uuid) references agents (id) on update CASCADE on delete CASCADE,
+  constraint fk_anomaly_scripts_cause foreign KEY (cause_id) references anomaly_causes (id) on update CASCADE on delete CASCADE
+) TABLESPACE pg_default;
+create table public.logs_with_metrics (
+  timestamp timestamp without time zone null,
+  event_id character varying(255) null,
+  level character varying(50) null,
+  source character varying(255) null,
+  message text null,
+  hostname character varying(255) null,
+  cpu_usage double precision null,
+  memory_usage double precision null,
+  id serial not null,
+  category text null,
+  agent_uuid uuid null,
+  constraint logs_with_metrics_pkey primary key (id),
+  constraint fk_logs_agent foreign KEY (agent_uuid) references agents (id)
+) TABLESPACE pg_default;
+
+create trigger after_delete_fix_ids
+after DELETE on logs_with_metrics for EACH STATEMENT
+execute FUNCTION fix_ids ();
+
+create trigger trigger_reorder_ids_after_delete
+after DELETE on logs_with_metrics for EACH STATEMENT
+execute FUNCTION reorder_logs_with_metrics_ids ();
+
+create trigger trg
+after DELETE on logs_with_metrics for EACH STATEMENT
+execute FUNCTION f ();
+create table public.system_metrics (
+  id uuid not null,
+  created_at timestamp with time zone null default timezone ('utc'::text, now()),
+  hostname text not null,
+  cpu_usage_percent numeric(5, 2) not null,
+  memory_usage_gb numeric(10, 2) not null,
+  memory_total_gb numeric(10, 2) not null,
+  memory_usage_percent numeric(5, 2) not null,
+  primary_disk_usage_gb numeric(10, 2) not null,
+  primary_disk_capacity_gb numeric(10, 2) not null,
+  primary_disk_usage_percent numeric(5, 2) not null,
+  secondary_disk_usage_gb numeric(10, 2) null,
+  secondary_disk_capacity_gb numeric(10, 2) null,
+  secondary_disk_usage_percent numeric(5, 2) null,
+  constraint system_metrics_pkey primary key (id),
+  constraint fk_system_metrics_agent_id foreign KEY (id) references agents (id) on update CASCADE on delete CASCADE,
+  constraint fk_system_metrics_hostname foreign KEY (hostname) references agents (hostname) on update CASCADE on delete CASCADE
+) TABLESPACE pg_default;
+create table public.users (
+  id uuid not null,
+  username text not null,
+  role text not null,
+  email text null,
+  created_at timestamp with time zone not null default now(),
+  constraint users_pkey primary key (id),
+  constraint users_id_fkey foreign KEY (id) references auth.users (id),
+  constraint users_role_check check ((role = any (array['admin'::text, 'user'::text])))
+) TABLESPACE pg_default;
+
+create table public.alerts (
+  id uuid not null default gen_random_uuid (),
+  router_id uuid null,
+  timestamp timestamp with time zone not null default timezone ('utc'::text, now()),
+  alert_type text not null,
+  source_ip inet not null,
+  dest_ip inet not null,
+  protocol text not null,
+  description text null,
+  status text null default 'pending'::text,
+  created_at timestamp with time zone not null default timezone ('utc'::text, now()),
+  updated_at timestamp with time zone not null default timezone ('utc'::text, now()),
+  constraint alerts_pkey primary key (id),
+  constraint alerts_router_id_fkey foreign KEY (router_id) references routers (id) on delete CASCADE,
+  constraint alerts_status_check check (
+    (
+      status = any (
+        array['pending'::text, 'blocked'::text, 'ignored'::text]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+create table public.routers (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  hostname text not null,
+  ip text not null,
+  status text not null default 'down'::text,
+  last_seen timestamp with time zone null default CURRENT_TIMESTAMP,
+  created_at timestamp with time zone not null default now(),
+  constraint routers_pkey primary key (id),
+  constraint routers_hostname_key unique (hostname)
+) TABLESPACE pg_default;
+
